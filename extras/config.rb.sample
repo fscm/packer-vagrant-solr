@@ -1,0 +1,5 @@
+# Internal Network CIDR
+$solr_network_cidr = "172.16.0.64/28"
+
+# Number of Solr nodes
+$solr_instances_number = 1

@@ -1,0 +1,73 @@
+# encoding: utf-8
+
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# For network calculation...
+require 'ipaddr'
+
+# Internal Network CIDR
+$solr_network_cidr ||= "172.16.0.64/28"
+
+# Number of Solr nodes
+$solr_instances_number ||= 1
+
+# Override default values if defined
+CONFIG ||= File.join(File.dirname(__FILE__), "config.rb")
+if File.exist?(CONFIG)
+  require CONFIG
+end
+
+# Calculate the list of cluster nodes
+solr_nodes ||= (1..$solr_instances_number).inject([IPAddr.new($solr_network_cidr)]){ |l, i| l << l.last.succ.to_s }[1..-1]
+
+# Calculate the list of zookeeper nodes
+zookeeper_nodes ||= solr_nodes[0,1].map.with_index(1){ |node, index| "server." + index.to_s + "=" + node + ":2888:3888" }
+##zookeeper_nodes ||= solr_nodes.map.with_index(1){ |node, index| "server." + index.to_s + "=" + node + ":2888:3888" }
+
+# Vagrantfile API/syntax version.
+VAGRANTFILE_API_VERSION ||= "2"
+
+# Vagrant version.
+# version 1.8.0 is required due to issue https://github.com/mitchellh/vagrant/issues/5497
+Vagrant.require_version ">= 1.8.0"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  config.vm.box = "fscm/solr"
+
+  config.ssh.forward_agent = false
+  config.ssh.forward_x11 = false
+  config.ssh.keep_alive = true
+  config.ssh.username = "pollywog"
+
+  config.vm.box_check_update = true
+
+  config.vm.network "forwarded_port", guest: 2181, host: 2181, protocol: "tcp", auto_correct: true
+  config.vm.network "forwarded_port", guest: 8983, host: 8983, protocol: "tcp", auto_correct: true
+
+  config.vm.communicator = "ssh"
+
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+  config.vm.synced_folder ".", "/shared", create: true
+
+  (1..$solr_instances_number).each do |instance|
+    config.vm.define instance_name = "solr%02d" % instance do |config|
+      config.vm.hostname = instance_name
+      config.vm.network "private_network", ip: solr_nodes[instance - 1], auto_config: true
+      config.vm.provision :shell, privileged: true, inline: "systemctl stop solr.service && echo solr service stoped"
+      config.vm.provision :shell, privileged: true, inline: "systemctl stop zookeeper.service && echo zookeeper service stoped"
+      config.vm.provision :shell, privileged: true, inline: "rm -rf /srv/solr/data/* /srv/solr/logs/* /srv/zookeeper/data/* /srv/zookeeper/logs/* && echo data cleaned up"
+      config.vm.provision :shell, privileged: true, inline: "echo " + instance.to_s + " > /srv/zookeeper/data/myid && chown zookeeper:zookeeper /srv/zookeeper/data/myid && echo zookeeper id created"
+      config.vm.provision :shell, privileged: true, inline: "cp /srv/solr/server/solr/solr.xml /srv/solr/data/ && chown solr:solr /srv/solr/data/solr.xml && echo solr config copied"
+      ##config.vm.provision :shell, privileged: true, inline: "cp /srv/solr/server/solr/solr.xml /srv/solr/data/ && sed -i -r -e '/zkClientTimeout/s/:[0-9]+/:600000/' /srv/solr/data/solr.xml && chown solr:solr /srv/solr/data/solr.xml && echo solr config copied"
+      config.vm.provision :shell, privileged: true, inline: "sed -i -r -e '/^server/d' /srv/zookeeper/conf/zoo.cfg && echo removed old zookeeper nodes from config"
+      config.vm.provision :shell, privileged: true, inline: "for node in " + zookeeper_nodes.join(' ') + "; do echo ${node} >> /srv/zookeeper/conf/zoo.cfg; done && echo added new zookeeper nodes to config" if instance == 1
+      ##config.vm.provision :shell, privileged: true, inline: "for node in " + zookeeper_nodes.join(' ') + "; do echo ${node} >> /srv/zookeeper/conf/zoo.cfg; done && echo added new zookeeper nodes to config"
+      config.vm.provision :shell, privileged: true, inline: "sed -i -r -e '/^SOLR_HOST=/s/=.*/=\"" + solr_nodes[instance - 1] + "\"/' -e '/^ZK_HOST=/s/=.*/=\"" + solr_nodes.join(':2181,') + ":2181\"/' /srv/solr/bin/solr.in.sh && echo solr config updated"
+      ##config.vm.provision :shell, privileged: true, inline: "sed -i -r -e '/^SOLR_HOST=/s/=.*/=\"" + solr_nodes[instance - 1] + "\"/' -e '/^ZK_HOST=/s/=.*/=\"" + solr_nodes.join(':2181,') + ":2181\"/' -e 's/# *ZK_CLIENT_TIMEOUT/ZK_CLIENT_TIMEOUT/;/^ZK_CLIENT_TIMEOUT/s/=.*/=\"600000\"/' /srv/solr/bin/solr.in.sh && echo solr config updated"
+      config.vm.provision :shell, privileged: true, inline: "systemctl start zookeeper.service && echo zookeeper service started" if instance == 1
+      ##config.vm.provision :shell, privileged: true, inline: "systemctl start zookeeper.service && echo zookeeper service started"
+      config.vm.provision :shell, privileged: true, inline: "systemctl start solr.service && echo solr service started"
+    end
+  end
+end
