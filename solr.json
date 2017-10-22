@@ -27,7 +27,7 @@
     "system_timezone":     "Europe/Lisbon",
     "system_user":         "pollywog",
     "zookeeper_uid":       "2006",
-    "zookeeper_version":   "3.4.9"
+    "zookeeper_version":   "3.4.10"
   },
   "builders": [
     {
