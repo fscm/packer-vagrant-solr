@@ -15,7 +15,7 @@
     "os_arch":             "amd64",
     "os_short_arch":       "x64",
     "os_type_virtualbox":  "Debian_64",
-    "os_version":          "9.1.0",
+    "os_version":          "9.2.1",
     "solr_uid":            "2012",
     "solr_version":        "6.6.0",
     "system_disk_size":    "8192",
